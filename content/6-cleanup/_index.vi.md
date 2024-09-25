@@ -14,7 +14,7 @@ Kết quả, chúng ta có thể truy cập trang web thông qua DNS name của 
 Ở phần clean resource, ta có thể để lại một vài thứ như bộ CodeBuild CodeDeploy và CodePipeline vì những service này tính tiền theo mình xài nhiêu trả nhiêu nên có thể để lại nếu như cần phục vụ mục đích sau này. ECS thì ta có thể cho desired task = 0 gần như là không mất phí, nếu như tạm thời ngừng bài workshop và cần làm tiếp thì đây là cách hiệu quả nhất. 
 Ngoài ra ta sẽ xóa ALB, TG, ... 
 Chọn ALB, confirm xóa.
-![ALB 1](/images/6.clean/01-alb.png)
+![ALB 1](/images/6.clean/01-ALB.png)
 ![ALB 2](/images/6.clean/02-alb.png)
 ![ALB 3](/images/6.clean/03-alb.png)
 Nếu có tạo EC2 để chạy database thì xóa luôn EC2. Chọn EC2 và **Stop** nếu cần để phục vụ sau này, không thì ta **Terminate** luôn.

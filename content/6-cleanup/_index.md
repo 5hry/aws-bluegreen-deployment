@@ -14,7 +14,7 @@ Above are the detailed steps to deploy an ECS service using the Blue/Green Deplo
 In the resource cleanup section, we can leave a few services like CodeBuild, CodeDeploy, and CodePipeline, as these services are pay-per-use, so they can be retained for future purposes. For ECS, we can set the desired task count to 0, which incurs almost no cost. This is an efficient way to pause the workshop temporarily and resume it later. 
 Additionally, we can delete resources like ALB, TG, etc.
 Select the ALB and confirm deletion.
-![ALB 1](/images/6.clean/01-alb.png)
+![ALB 1](/images/6.clean/01-ALB.png)
 ![ALB 2](/images/6.clean/02-alb.png)
 ![ALB 3](/images/6.clean/03-alb.png)
 
