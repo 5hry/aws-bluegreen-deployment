@@ -1,0 +1,113 @@
+[
+{
+	"uri": "//localhost:1313/vi/",
+	"title": "ECS Service Blue/Green Deployment",
+	"tags": [],
+	"description": "",
+	"content": "Triển khai Amazon ECS Service sử dụng chiến lược Blue/Green Deployment Tổng quan Trong phần này, chúng ta sẽ triển khai chiến lược này trên AWS Cloud với kiến trúc được minh họa dưới đây.\nTóm tắt ngắn gọn về hệ thống: khi người dùng truy cập Internet, họ sẽ đi qua một Application Load Balancer mở hai cổng, 80 và 81, trỏ đến hai Target Groups đã đăng ký các tasks trong ECS Service. Cổng 80 sẽ chuyển hướng lưu lượng truy cập đến các tasks đang chạy trong môi trường sản xuất, trong khi cổng 81 chuyển hướng lưu lượng đến các tasks chạy để kiểm tra. Các tasks này trỏ đến một cơ sở dữ liệu chạy trên một EC2 instance.\nVề phần Deployment, khi mã nguồn được đẩy lên Github, nó sẽ kích hoạt CodeBuild để xây dựng lại image mới từ mã nguồn, sau đó đẩy các artifacts lên S3 để CodeDeploy có thể kéo về và triển khai lên ECS Cluster. (Ở đây, chúng ta không sử dụng CodeCommit vì dịch vụ này không còn hỗ trợ tài khoản mới, nên chúng ta sử dụng Github thay thế.)\n"
+},
+{
+	"uri": "//localhost:1313/vi/1-introduction/",
+	"title": "Giới thiệu",
+	"tags": [],
+	"description": "",
+	"content": "In this section, we will explore what Blue/Green Deployment is and the problem it solves.\nFirst, in the traditional model, when updating an application, there is a downtime period during the deployment process because the same hardware (where the application is running) is used. To avoid disrupting the user experience, updates are often performed late at night, and the application is temporarily suspended. While this reduces the impact, it still causes some disruption for certain users.\nTo solve this issue, Blue/Green Deployment was introduced. This deployment strategy minimizes downtime to nearly zero. The idea behind this strategy is to create two identical hardware environments to run two production environments. The workflow can be summarized as follows:\nWe have two identical hardware setups. One is running the current version of the application that users are interacting with, called Blue, while the other environment runs the new version of the application (not yet released to users), called Green. Once the new version is deployed and there are no issues, user traffic is routed to the Green environment. The Blue environment then becomes the environment for the next deployment version. Thus, with this strategy, the downtime issue has been resolved. "
+},
+{
+	"uri": "//localhost:1313/vi/5-codepipeline/5.1-codebuild/",
+	"title": "Tạo CodeBuild",
+	"tags": [],
+	"description": "",
+	"content": "Theo như mô hình, hiện tại ta đã có repo Github chứa source code của ứng dụng được trình bày ở phần Introduction. Tiếp theo chúng ta cần tạo một build project bằng CodeBuild để build ra image từ source code trên Github.\nTa tạo connection đến bằng OAuth. Environment ta chọn On Demand (tính tiền dựa trên thời gian Build), Image chọn image được quản lý bởi CodeBuild, Compute ta chọn EC2 để tránh việc có thể bị ngắt nếu như build quá lâu vì Lambda có giới hạn thời gian. Chúng ta gán cho Build Project này các quyền tương tác với ECR, CloudWatch và Secret Manager để đọc các biến secret được lưu ở đây ví dụ như username, password của account DockerHub để đăng nhập vào DockerHub để push image lên. Tiếp theo ta cần chỉ ra cho project biết được cần làm gì trong quá trình build thông qua file buildspec.yaml. Có 3 phase là pre_build (thực hiện các hành động trước khi build), build (hành động build) và post_build (sau khi build xong thực hiện các hành động này).\nPre_build: log in vào ECR để lấy URI của repo và commit hash của repo gán vào 2 biến để phục vụ quá trình build. Build: Thực hiện build ra image và đánh tag cho image đó. Post_build: push image lên lại ECR repo, ghi thông tin về image ra file imageDetail.json để phục vụ cho CodeDeploy đọc thông tin triển khai cho ECS. Dưới đây là file buildspec.yaml để chỉ ra cho CodeBuild biết cần làm gì.\nCụ thể thì trong file này, ở bước Pre_build thì Build Project này sẽ đăng nhập vào DockerHub với username và password lưu trong Secret Manager, đăng nhập vào ECR, và lấy commit hash của Github repo khi trigger CodeBuild. Bước Build, Build Project sẽ thực hiện build ra image từ source code trên github khi trigger, sau đó đánh tag cho image. Cuối cùng, ở bước Post_build thì sẽ push image với 2 tag latest và commit hash lên ECR, sau đó ghi thông tin image (Image URI và Repo) vào file imageDetails.json.\nCác file artifacts như:\nappspec.yaml: để chỉ ra task def và container cũng như port của container để triển khai lên ECS. imageDetail.json: chứa thông tin và image vừa được build ra. taskdef.json: chứa thông tin định nghĩa task chạy trong ECS. Chọn S3 bucket để lưu các artifacts:\nLưu logs của quá trình Build bằng CloudWatch. Sau đó chọn Create build project để hoàn thành quá trình tạo. Mỗi khi tạo một Build Project, sau khi tạo xong nó sẽ tự động chạy 1 lần mà chưa cần trigger từ Github.\n"
+},
+{
+	"uri": "//localhost:1313/vi/4-ecscluster/4.1-ecrrepo/",
+	"title": "Tạo ECR Repo",
+	"tags": [],
+	"description": "",
+	"content": "Đầu tiên vì chúng ta chạy ứng dụng container nên cần tạo ra image, vì vậy ta cũng cần nơi bảo mật để chứa các image đó và cũng tiện để truy cập từ ECS. Do đó, ta có thể chọn ECR để lưu trữ các image được build ra. Ta thực hiện tạo một ECR repo có tên là ws1-bluegreen-repo như hình dưới.\nNếu như những image trong này không phục vụ bất cứ tác vụ nào ở ngoài dịch vụ AWS thì nên để ở private để đảm bảo bảo mật, tránh bị đánh cắp image.\n"
+},
+{
+	"uri": "//localhost:1313/vi/3-alb-tg/3.1-tg/",
+	"title": "Tạo hai target groups blue và green",
+	"tags": [],
+	"description": "",
+	"content": "Tạo 2 Target Groups Blue và Green để chứa các tasks chạy ứng dụng web trong ECS Cluster. Ở đây chọn target type là IP Address vì các task ta sẽ chạy mode Fargate thay vì EC2 instance.\nMở port 80 trên cả 2 target group.\nCó thể cấu hình health check để kiểm tra xem các task được register trong TG có healthy không. Health check ở trang gốc.\nCác thông số nâng cao cho health check.\nBây giờ đã có 2 target groups blue và green. Tuy nhiên 2 Target groups blue và green này vẫn chưa được associate cho Load Balancer nào. Vì vậy cần tạo ALB để load traffic vào 2 TG này. "
+},
+{
+	"uri": "//localhost:1313/vi/2-prerequiste/",
+	"title": "Các bước chuẩn bị",
+	"tags": [],
+	"description": "",
+	"content": "\rBạn cần có sẵn một ứng dụng web, nếu như không có thì không thể làm tiếp được. Có thể tham khảo và sử dụng ứng dụng web ở đây\nWorkshop này yêu cầu cần source code cho ứng dụng web và Dockerfile để build ứng dụng. Trong workshop này mình sẽ sử dụng ứng dụng web bán hàng, cụ thể là những thiết bị điện tử. Có truy cập database được chạy trên một EC2 Instance.\nVì workshop này tập trung vào BlueGreenDeployment nên mình tạo một EC2 Instance để chạy database để tiết kiệm.\nMình có chuẩn bị một Dockerfile để chạy database ở mã nguồn ở trên. Các bạn có thể tải về để chạy hoặc có thể copy DNS của EC2 Instance mình đã tạo ở đây (ec2-54-169-49-30.ap-southeast-1.compute.amazonaws.com) cho vào file connectDB.php EC2 đang chạy một image database của ứng dụng. Bây giờ ta có thể follow theo các bước trong Workshop mà không cần lo lắng thiếu gì nữa.\n"
+},
+{
+	"uri": "//localhost:1313/vi/3-alb-tg/3.2-alb/",
+	"title": "Tạo Application Load Balancer trỏ đến 2 TG",
+	"tags": [],
+	"description": "",
+	"content": "ALB để nhận traffic trực tiếp từ users nên cần chọn scheme Internet Facing, hiện tại chỉ cần IPv4. Ở đây chọn hết 3 zones của region Singapore.\nỞ đây, ta cần chọn ít nhất 2 zones, tuy nhiên càng nhiều càng tốt. Ở mỗi zone chúng ta chọn thì ALB sẽ đặt một \u0026hellip;(cái này mình quên, mình sẽ tìm hiểu và update lại) ở public subnet của zone đó. Sau đó, khi traffic vào hoặc ra subnet của zone đó thì sẽ đi thông qua cái đó.\nTạo 2 listeners, ở đây mỗi listener sẽ lắng nghe một port trên ALB sau đó sẽ forward traffic đến cho từng TG tương ứng, ở đây port 80 sẽ forward đến Blue group, và port 81 sẽ forward đến Green group.\nTrong Security group phải mở cả 2 port 80 cho users và port 81 cho phục vụ người nào đảm nhiệm testing. Nếu không mở port 81 thì sẽ không thể truy cập vào testing environment được.\nTa có thể xem tổng quan về ALB chúng ta sắp tạo ở dưới đây, nếu có gì sai sót có thể sửa lại trước khi nhấn Create. Sau khi Create, ta đã có được DNS name, chúng ta có thể truy cập thông qua DNS name này.\n"
+},
+{
+	"uri": "//localhost:1313/vi/5-codepipeline/5.2-codedeploy/",
+	"title": "Tạo CodeDeploy",
+	"tags": [],
+	"description": "",
+	"content": "Sau khi đã tạo xong Build Project, ta sẽ tạo CodeDeploy để lấy image được build ra từ Build Project để triển khai chạy các task trong 2 target Blue và Green.\nVào CodeDeploy, tạo một application với platform là Amazon ECS. Từ applications vừa tạo, tạo thêm một deployment group để chứa các deployments. Trong đó cần role có những quyền đọc ECR, deploy ECS, đọc S3, và ALB để điều chỉnh traffic. Tiếp đó ta sẽ cấu hình các thông tin về cluster, service, ALB,… Chọn lại thông tin Cluster và Service đã tạo phần trước và ALB, Target Group đã tạo ở phần 2. Ở đây ta có thể cấu hình deployment theo nhiều cách như có thể reroute traffic ngay lập tức khi tạo xong các task mới hoặc có thể cấu hình thời gian để reroute traffic, chiến lược reroute,… và terminate các task đang chạy phiên bản cũ. Chọn Create Deployment group để tạo.\nKhi chạy deploy thì sẽ khởi tạo CloudFormation để tạo các resource trên ECS.\n"
+},
+{
+	"uri": "//localhost:1313/vi/4-ecscluster/4.2-ecscluster/",
+	"title": "Tạo ECS Cluster",
+	"tags": [],
+	"description": "",
+	"content": "Tiếp đến sau khi đã tạo ECR - nơi chứa các image được build ra thì ta cần tạo một ECS Cluster để chứa service chạy các task chạy ứng dụng của chúng ta.\nGiờ mình sẽ tạo một cluster để chứa service chạy các tasks. Chọn mode Fargate.\nSau khi tạo Cluster với những thông số cơ bản, tạo một service để deploy các tasks với launch type là fargate trong ECS Cluster vừa tạo. Deployment configure thì mình sẽ chọn service để launch một task group thay vì chỉ một task ⇒ hỗ trợ blue/green deployment. Ở đây ta cần tạo một task definition định nghĩa phần cứng ảo cũng như là container cho task chạy. Ta có thể vào ECS để tạo hoặc tạo bằng json. Nó có định nghĩa container trong task sẽ chạy image nào, container port, host port, …\nĐể mà có thể thao tác với ECR, ECS, S3, ELB, … ta cần tạo một role để gán cho CodeDeploy có những quyền đó để lấy image từ ECR, deploy các tasks trong ECS và đọc source từ S3, \u0026hellip;\nỞ phần networking ta sẽ chọn security group như đã trình bày lúc nãy. Vì ta Fargate này cần pull image từ ECR nên cần để public IP để có thể ra ngoài Internet, có thể tắt nếu cấu hình lại route table và NAT gateway.\nCấu hình thêm Load Balancing chọn Production listener đã được thêm từ lúc đầu là port 80 và Test listener là port 81 forward đến 2 Target group blue và green. Chúng ta sẽ chọn ALB đã được tạo từ phần trước để forward traffic đến 2 TG blue và green.\nSau khi chọn Create thì ta đã có service với các tasks đang ở trạng thái pending. "
+},
+{
+	"uri": "//localhost:1313/vi/3-alb-tg/",
+	"title": "Tạo ALB và Target Group",
+	"tags": [],
+	"description": "",
+	"content": "Trong bước này, chúng ta sẽ thực hiện tạo ALB và Target Group để route traffic tới ALB đến cho các Target Group tương ứng.\nNội dung 3.1. Tạo Target Group để nhóm các Task chạy ứng dụng web 3.2. Tạo ALB để phân phối traffic đến cho các Target tương ứng\n"
+},
+{
+	"uri": "//localhost:1313/vi/5-codepipeline/5.3-codepipeline/",
+	"title": "Tạo CodePipeline",
+	"tags": [],
+	"description": "",
+	"content": "Sau khi đã hoàn thành tạo Build project và Deployment group ở phần trước, thì ta sẽ tạo CodeDeploy để kết nối 2 service này lại để khi trigger từ source code sẽ chạy 2 service này liên tục và output của Build project là các file artifact sẽ làm input cho Deployment để triển khai các task lên ECS service.\nChọn mode Superseded để có thể thực hiện đè được luồng pipeline cũ. Ta có thể tạo mới role và gán thêm các policy mới cho role đó, ví dụ như S3, các quyền liên quan được gán trong 2 service CodeBuild và CodeDeploy. Source stage: Ta có thể kết nối với source code từ github thông qua connection kết nối với Github và chỉ ra repo cũng như branch của repo cho pipeline. Ở đây có thể chọn các thông tin về trigger từ Github: no filter (trigger pipeline với bất kì push hoặc clone repo), specify filter (chỉ ra các commit nào mới trigger pipeline), hoặc không không tự động trigger pipeline. Build stage: Chỉ ra build project đã tọa hoặc tạo project mới. Deploy stage: stage này sẽ chỉ ra cần deploy application nào, trong deploy group nào, cũng như các artifacts được lưu ở đâu. Ta sẽ chọn deploy application và group vừa tạo. Chọn BuildArtifact từ S3.\nCác file artifacts: appspec.yaml, taskdef.json để chỉ ra task, container chạy image vừa được build ra. Sau khi hoàn tất quá trình tạo CodePipeline thì có thể chọn Release change để chạy Pipeline, khi chạy từng stage, ta có thể xem chi tiết quá trình bằng cách chọn View detail. Sau khi chạy thì giờ đã có thêm một task mới chạy new revision của taskdef. Add Notifications: Ngoài ra, ta có thể thêm stage vào pipeline, ví dụ sau khi thay đổi source code, sau khi build xong thì sẽ cần người review lại xem có thực hiện bước tiếp theo không. Mình sẽ tạo thêm SNS để thông báo tới những người này xem có confirm chạy bước tiếp theo không. Tạo một subscription để thông báo qua mail,… Add stage để thêm bước Manual Approval Thêm action là Manual Approval và sau khi chạy tới stage này thì pipe sẽ dừng và chờ confirm thì mới được chạy tiếp tục. Khi build xong thì tới stage này sẽ chờ để Approval hoặc Reject thì sẽ tiếp tục hoặc dừng pipeline để chờ confirm từ người kiểm tra. Sau khi chạy tới bước Deployment thì ta có thể xem quá trình deploy ở deployment trong detail. Ở đây, ta có thể xem được thông tin quá trình deploy, các task được tạo mới và có thể reroute trước traffic thay vì hết thời gian đã chỉ định. Hoặc cũng có thể rollback ngay khi phát hiện lỗi mà không có downtime. "
+},
+{
+	"uri": "//localhost:1313/vi/4-ecscluster/",
+	"title": "Tạo ECR và ECS Cluster",
+	"tags": [],
+	"description": "",
+	"content": "Ở bước này, ta sẽ tạo ECR Repo và ECS Cluster, service để khi build ra image thì ta push lên ECR và máy Fargate sẽ pull về để chạy container.\nNội dung 3.1. Tạo ECR Repo 3.2. Tạo ECS Services\n"
+},
+{
+	"uri": "//localhost:1313/vi/5-codepipeline/",
+	"title": "Tạo luồng CodePipeline",
+	"tags": [],
+	"description": "",
+	"content": " Hình trên mô tả quá trình CI/CD với các dịch vụ của AWS. Mối quan hệ giữa các dịch vụ trong sơ đồ như sau:\nCodePipeline: Là dịch vụ quản lý luồng công việc CI/CD, điều khiển việc tự động hóa triển khai ứng dụng thông qua các bước. Hiện tại CodeCommit đã không còn hỗ trợ users mới nên mình chuyển qua dùng Github để tiện cho tất cả mọi người.\nCodeCommit Repo: Lưu trữ mã nguồn của dự án, trong đó bao gồm các file taskdef.json và appspec.yaml.\ntaskdef.json: Định nghĩa task cho Amazon ECS. appspec.yaml: Định nghĩa các thông tin cần thiết cho việc triển khai trong CodeDeploy. Image Repo (Amazon ECR): Lưu trữ các Docker images được build từ dự án. Đây là nơi lưu giữ phiên bản container của ứng dụng.\nAmazon ECR action: Lấy Docker image từ Image Repo (Amazon ECR) để đưa vào quy trình triển khai.\nAmazon ECS: Dịch vụ chạy các container ứng dụng. Amazon ECS nhận Docker image từ Amazon ECR và thực thi ứng dụng.\nCodeDeploy ECS Blue/Green action: Triển khai ứng dụng theo chiến lược Blue/Green, tức là có thể chạy hai phiên bản ứng dụng song song (một phiên bản hiện tại và một phiên bản mới), để đảm bảo rằng nếu phiên bản mới có lỗi, ta có thể quay lại phiên bản cũ một cách nhanh chóng.\nAmazon S3 artifact bucket: Lưu trữ các artifacts (chẳng hạn như imageDetail.json) chứa các thông tin về quá trình triển khai, bao gồm thông tin về Docker image, ECS task, và quá trình CodeDeploy.\nQuá trình tổng quan:\nCodePipeline bắt đầu quá trình CI/CD và điều hướng các hành động tiếp theo. CodeCommit quản lý mã nguồn, và sau khi mã được đẩy lên, nó kích hoạt hành động Amazon ECR để lấy Docker image. Tuy nhiên ở trong workshop này, mình sẽ thay thế CodeCommit bằng Github để phục vụ cho tất cả mọi người. Docker image sau đó được triển khai trên Amazon ECS. CodeDeploy quản lý việc triển khai ứng dụng với chiến lược Blue/Green, đồng thời lưu trữ thông tin chi tiết của quá trình triển khai vào Amazon S3. "
+},
+{
+	"uri": "//localhost:1313/vi/6-cleanup/",
+	"title": "Kết quả, dọn dẹp tài nguyên",
+	"tags": [],
+	"description": "",
+	"content": "Kết quả, chúng ta có thể truy cập trang web thông qua DNS name của ALB. Ở trên là chi tiết các bước deploy ECS service sử dụng chiến lược Blue/Green Deployment. Và có thể truy cập được qua DNS của ALB. Tiếp tục mình sẽ củng cố, phát triển, sử dụng Route53 để triển khai route traffic để tối ưu hóa việc route traffic.\nỞ phần clean resource, ta có thể để lại một vài thứ như bộ CodeBuild CodeDeploy và CodePipeline vì những service này tính tiền theo mình xài nhiêu trả nhiêu nên có thể để lại nếu như cần phục vụ mục đích sau này. ECS thì ta có thể cho desired task = 0 gần như là không mất phí, nếu như tạm thời ngừng bài workshop và cần làm tiếp thì đây là cách hiệu quả nhất. Ngoài ra ta sẽ xóa ALB, TG, \u0026hellip; Chọn ALB, confirm xóa. Nếu có tạo EC2 để chạy database thì xóa luôn EC2. Chọn EC2 và Stop nếu cần để phục vụ sau này, không thì ta Terminate luôn. Cuối cùng, nếu tạo quá nhiều image trong ECR thì nên xóa, có thể để lại image mới nhất để phục vụ sau này. Xóa các Task Definition cũ nếu không cần dùng đến, deregister các Task cũ. Vậy là mình đã hoàn thành việc clean resource. Cảm ơn các bạn đã đọc, nếu có góp ý về nội dung các bạn có thể liên hệ qua facebook này.\n"
+},
+{
+	"uri": "//localhost:1313/vi/categories/",
+	"title": "Categories",
+	"tags": [],
+	"description": "",
+	"content": ""
+},
+{
+	"uri": "//localhost:1313/vi/tags/",
+	"title": "Tags",
+	"tags": [],
+	"description": "",
+	"content": ""
+}]

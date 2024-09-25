@@ -1,0 +1,113 @@
+[
+{
+	"uri": "//localhost:1313/",
+	"title": "Blue/Green Deployment",
+	"tags": [],
+	"description": "",
+	"content": "Deploying an Amazon ECS service using a blue/green deployment Overall In this section, we will implement this deployment strategy on AWS Cloud with the architecture shown below.\nA brief overview of the system: when users access the Internet, they pass through an Application Load Balancer that opens two ports, 80 and 81, pointing to two Target Groups registered with tasks in the ECS Service. Port 80 directs traffic to tasks running the production environment, while port 81 directs traffic to tasks running for testing. These tasks point to a database running on an EC2 instance.\nAs for Deployment, when code is pushed to Github, it triggers CodeBuild to rebuild a new image from the source code and then pushes the artifacts to S3 so that CodeDeploy can pull them and deploy them to the ECS Cluster. (Here, we are not using CodeCommit because it no longer supports new accounts, so we are using Github instead.)\n"
+},
+{
+	"uri": "//localhost:1313/3-alb-tg/3.1-tg/",
+	"title": "Create Blue, Green Groups",
+	"tags": [],
+	"description": "",
+	"content": "Create two Target Groups, Blue and Green, to contain the tasks running the web application in the ECS Cluster. Here, select the target type as IP Address because the tasks will run in Fargate mode instead of EC2 instances.\nOpen port 80 on both target groups.\nYou can configure health checks to verify if the tasks registered in the TG are healthy. Health checks are available on the main page.\nAdvanced settings for health checks.\nNow we have two target groups, Blue and Green. However, these two target groups are not yet associated with any Load Balancer. Therefore, we need to create an ALB to load traffic into these two TGs.\n"
+},
+{
+	"uri": "//localhost:1313/5-codepipeline/5.1-codebuild/",
+	"title": "Create CodeBuild",
+	"tags": [],
+	"description": "",
+	"content": "According to the model, we now have a Github repository containing the source code of the application, as mentioned in the Introduction section. Next, we need to create a build project using CodeBuild to build an image from the source code on Github.\nWe create a connection using OAuth. For the Environment, select On Demand (pay based on build time). For the Image, choose an image managed by CodeBuild. For Compute, select EC2 to avoid timeouts, as Lambda has a time limit. We assign this Build Project the permissions to interact with ECR, CloudWatch, and Secret Manager to read secret variables stored there, such as the username and password of the DockerHub account, in order to log in to DockerHub and push the image. Next, we need to specify what the project should do during the build process using the buildspec.yaml file. There are 3 phases: pre_build (actions before the build), build (the build actions), and post_build (actions after the build is completed).\nPre_build: Log in to ECR to get the URI of the repo and the commit hash of the repo, assigning these to two variables for use in the build process. Build: Build the image and tag the image. Post_build: Push the image to the ECR repo, then write the image information to the imageDetail.json file for CodeDeploy to use for deployment to ECS. Below is the buildspec.yaml file to tell CodeBuild what to do.\nSpecifically, in this file:\nIn the Pre_build step, the Build Project will log in to DockerHub using the username and password stored in Secret Manager, log in to ECR, and retrieve the commit hash of the Github repo when triggering CodeBuild. In the Build step, the Build Project will build the image from the source code on Github when triggered, then tag the image. Finally, in the Post_build step, the image will be pushed with two tags, latest and the commit hash, to ECR, and then the image information (Image URI and Repo) will be written to the imageDetails.json file. The artifact files include:\nappspec.yaml: Defines the task, container, and container port for deployment to ECS. imageDetail.json: Contains information about the image that was built. taskdef.json: Contains the task definition for running in ECS. Select the S3 bucket to store the artifacts:\nStore build logs using CloudWatch. Then select Create build project to complete the creation process. Each time a Build Project is created, it will automatically run once without needing to be triggered by Github.\n"
+},
+{
+	"uri": "//localhost:1313/4-ecscluster/4.1-ecrrepo/",
+	"title": "Create ECR Repo",
+	"tags": [],
+	"description": "",
+	"content": "First, since we are running a containerized application, we need to create an image. Therefore, we also need a secure place to store these images that is easily accessible from ECS. We can choose ECR to store the built images. We create an ECR repo named ws1-bluegreen-repo as shown below.\nIf the images in this repo are not serving any tasks outside of AWS services, it is recommended to keep them private to ensure security and prevent image theft.\n"
+},
+{
+	"uri": "//localhost:1313/1-introduction/",
+	"title": "Introduction",
+	"tags": [],
+	"description": "",
+	"content": "In this section, we will explore what Blue/Green Deployment is and the problem it solves.\nFirst, in the traditional model, when updating an application, there is a downtime period during the deployment process because the same hardware (where the application is running) is used. To avoid disrupting the user experience, updates are often performed late at night, and the application is temporarily suspended. While this reduces the impact, it still causes some disruption for certain users.\nTo solve this issue, Blue/Green Deployment was introduced. This deployment strategy minimizes downtime to nearly zero. The idea behind this strategy is to create two identical hardware environments to run two production environments. The workflow can be summarized as follows:\nWe have two identical hardware setups. One is running the current version of the application that users are interacting with, called Blue, while the other environment runs the new version of the application (not yet released to users), called Green. Once the new version is deployed and there are no issues, user traffic is routed to the Green environment. The Blue environment then becomes the environment for the next deployment version. Thus, with this strategy, the downtime issue has been resolved. "
+},
+{
+	"uri": "//localhost:1313/3-alb-tg/3.2-alb/",
+	"title": "Create Application Load Balancer",
+	"tags": [],
+	"description": "",
+	"content": "ALB is used to receive traffic directly from users, so we need to select the Internet Facing scheme, and for now, we only need IPv4. Here, select all 3 zones in the Singapore region.\nHere, we need to select at least 2 zones, but the more, the better. For each zone we select, the ALB will place a \u0026hellip;(I forgot this part, I will research and update it) in the public subnet of that zone. Afterward, when traffic enters or exits the subnet of that zone, it will pass through that.\nCreate 2 listeners, where each listener will listen on a port on the ALB and then forward traffic to the corresponding TG. Here, port 80 will forward traffic to the Blue group, and port 81 will forward traffic to the Green group.\nIn the Security group, you must open both port 80 for users and port 81 for those responsible for testing. If port 81 is not open, access to the testing environment will not be possible.\nWe can review an overview of the ALB we are about to create below. If there are any mistakes, they can be corrected before clicking Create. After clicking Create, we will have the DNS name, and we can access it through this DNS name.\n"
+},
+{
+	"uri": "//localhost:1313/5-codepipeline/5.2-codedeploy/",
+	"title": "Create CodeDeploy",
+	"tags": [],
+	"description": "",
+	"content": "After creating the Build Project, we will create CodeDeploy to take the image built from the Build Project and deploy it to run tasks in the two targets Blue and Green.\nIn CodeDeploy, create an application with the platform Amazon ECS. From the newly created application, create a deployment group to hold the deployments. The role assigned here needs permissions to read from ECR, deploy ECS tasks, read S3, and manage ALB traffic. Next, configure the information for the cluster, service, ALB, etc. Select the Cluster and Service created in the previous section, along with the ALB and Target Groups created in section 2. Here, you can configure the deployment in multiple ways, such as rerouting traffic immediately after the new tasks are created or configuring the time to reroute traffic, rerouting strategies, and terminating tasks running the old version. Select Create Deployment Group to complete the creation.\nWhen deploying, CloudFormation will be initiated to create resources on ECS.\n"
+},
+{
+	"uri": "//localhost:1313/5-codepipeline/5.3-codepipeline/",
+	"title": "Create CodePipeline",
+	"tags": [],
+	"description": "",
+	"content": "After completing the creation of the Build project and Deployment group in the previous section, we will now create CodeDeploy to connect these two services. When triggered by the source code, these services will run continuously, with the output of the Build project (artifacts) serving as the input for the Deployment to deploy tasks to the ECS service.\nSelect the Superseded mode to overwrite the old pipeline flow. You can create a new role and assign additional policies, such as S3 permissions, and related permissions for both CodeBuild and CodeDeploy services. Source stage: You can connect the source code from Github via a connection to Github, specifying the repo and branch for the pipeline. You can choose the trigger settings for Github: no filter (trigger pipeline with any push or clone of the repo), specify filter (specify which commits trigger the pipeline), or disable automatic triggers. Build stage: Specify the previously created Build project or create a new one. Deploy stage: This stage specifies which application to deploy, in which deployment group, and where the artifacts are stored. Select the application and deployment group you just created. Choose BuildArtifact from S3. Artifact files: appspec.yaml and taskdef.json specify the task and container to run the image that was just built. After completing the CodePipeline setup, you can choose Release change to run the Pipeline. As each stage runs, you can view the details of the process by selecting View detail. Once executed, a new task running the new revision of the task definition is created. Add Notifications: You can add additional stages to the pipeline, for example, after source code changes or after the build, a manual review might be required to proceed. To achieve this, you can create an SNS to notify reviewers, asking them to confirm whether to continue to the next stage. Create a subscription to send notifications via email, etc. Add a stage for Manual Approval. Add a Manual Approval action. Once the pipeline reaches this stage, it will pause and wait for confirmation before proceeding. After the build is completed, it will wait for Approval or Reject, continuing or pausing the pipeline for confirmation from the reviewer. Once the pipeline reaches the Deployment step, you can view the deployment details. Here, you can monitor the deployment process, see newly created tasks, and even manually reroute traffic before the specified time elapses. You can also rollback if an error is detected without causing downtime. "
+},
+{
+	"uri": "//localhost:1313/4-ecscluster/4.2-ecscluster/",
+	"title": "Create ECS Service",
+	"tags": [],
+	"description": "",
+	"content": "Next, after creating the ECR to store the built images, we need to create an ECS Cluster to hold the service running the tasks for our application.\nNow, I will create a cluster to hold the service running the tasks. Select Fargate mode.\nAfter creating the Cluster with basic configurations, create a service to deploy tasks with the launch type as Fargate in the newly created ECS Cluster. For Deployment configuration, select the service to launch a task group instead of a single task, which supports blue/green deployment. Here, we need to create a task definition that defines the virtual hardware and the container for the running task. You can create it in ECS or via JSON. It defines which image the container in the task will run, the container port, host port, etc.\nTo interact with ECR, ECS, S3, ELB, etc., we need to create a role and assign it to CodeDeploy so it has the necessary permissions to pull images from ECR, deploy tasks in ECS, read the source from S3, and so on.\nIn the networking section, select the security group as previously discussed. Since this Fargate needs to pull images from ECR, it requires public IP access to connect to the Internet, although this can be turned off if the route table and NAT gateway are reconfigured.\nAdditionally, configure Load Balancing by selecting the Production listener added earlier as port 80 and the Test listener as port 81, forwarding traffic to the Blue and Green Target groups. We will select the ALB created in the previous section to forward traffic to the Blue and Green TGs.\nAfter clicking Create, we now have a service with tasks in the pending state. "
+},
+{
+	"uri": "//localhost:1313/2-prerequiste/",
+	"title": "Preparation ",
+	"tags": [],
+	"description": "",
+	"content": "\rYou need to have a web application ready; if you don\u0026rsquo;t have one, you cannot proceed. You can refer to and use the web application here\nThis workshop requires the source code for a web application and a Dockerfile to build the application. In this workshop, I will use a sales web application, specifically for electronic devices. It will connect to a database running on an EC2 Instance.\nSince this workshop focuses on BlueGreenDeployment, I created an EC2 Instance to run the database to save resources.\nI have prepared a Dockerfile to run the database from the source code above. You can download it to run or simply copy the DNS of the EC2 Instance I created here (ec2-54-169-49-30.ap-southeast-1.compute.amazonaws.com) into the connectDB.php file. The EC2 is running a database image for the application. Now we can follow the steps in the workshop without worrying about missing anything.\n"
+},
+{
+	"uri": "//localhost:1313/3-alb-tg/",
+	"title": "Create ALB and Target Group",
+	"tags": [],
+	"description": "",
+	"content": "In this step, we will create an ALB and Target Group to route traffic from the ALB to the corresponding Target Groups.\nContent 3.1. Create a Target Group to group the Tasks running the web application 3.2. Create an ALB to distribute traffic to the corresponding Targets\n"
+},
+{
+	"uri": "//localhost:1313/4-ecscluster/",
+	"title": "ECR and ECS Cluster",
+	"tags": [],
+	"description": "",
+	"content": "In this step, we will create an ECR Repo and ECS Cluster, along with a service. Once the image is built, it will be pushed to ECR, and the Fargate machine will pull it to run the container.\nContent 3.1. Create ECR Repo 3.2. Create ECS Services\n"
+},
+{
+	"uri": "//localhost:1313/5-codepipeline/",
+	"title": "Create CI/CD pipeline",
+	"tags": [],
+	"description": "",
+	"content": " The image above illustrates the CI/CD process with AWS services. The relationship between the services in the diagram is as follows:\nCodePipeline: This service manages the CI/CD workflow, automating the application deployment process through various steps. Currently, CodeCommit no longer supports new users, so I have switched to using Github to make it more convenient for everyone.\nCodeCommit Repo: Stores the project\u0026rsquo;s source code, including the taskdef.json and appspec.yaml files.\ntaskdef.json: Defines the task for Amazon ECS. appspec.yaml: Specifies the necessary information for deployment in CodeDeploy. Image Repo (Amazon ECR): Stores the Docker images built from the project. This is where the container version of the application is kept.\nAmazon ECR action: Retrieves the Docker image from Image Repo (Amazon ECR) to enter the deployment process.\nAmazon ECS: This service runs containerized applications. Amazon ECS retrieves the Docker image from Amazon ECR and runs the application.\nCodeDeploy ECS Blue/Green action: Deploys the application using the Blue/Green strategy, allowing two application versions to run in parallel (one current version and one new version). This ensures that if the new version has issues, you can quickly revert to the old version.\nAmazon S3 artifact bucket: Stores artifacts (such as imageDetail.json), which contain information about the deployment process, including details on the Docker image, ECS task, and the CodeDeploy process.\nOverview of the process:\nCodePipeline starts the CI/CD process and directs the subsequent actions. CodeCommit manages the source code, and once the code is pushed, it triggers the Amazon ECR action to retrieve the Docker image. However, in this workshop, we will replace CodeCommit with Github for everyone\u0026rsquo;s convenience. The Docker image is then deployed on Amazon ECS. CodeDeploy manages the application deployment using the Blue/Green strategy, while detailed deployment information is stored in Amazon S3. "
+},
+{
+	"uri": "//localhost:1313/6-cleanup/",
+	"title": "Clean up resources",
+	"tags": [],
+	"description": "",
+	"content": "As a result, we can access the website through the DNS name of the ALB. Above are the detailed steps to deploy an ECS service using the Blue/Green Deployment strategy. You can access it via ALB DNS. Next, I will enhance and develop it further by using Route53 to optimize traffic routing.\nIn the resource cleanup section, we can leave a few services like CodeBuild, CodeDeploy, and CodePipeline, as these services are pay-per-use, so they can be retained for future purposes. For ECS, we can set the desired task count to 0, which incurs almost no cost. This is an efficient way to pause the workshop temporarily and resume it later. Additionally, we can delete resources like ALB, TG, etc. Select the ALB and confirm deletion. If you created an EC2 instance for running the database, delete the EC2 instance. Select EC2 and choose Stop if you need it for later use, otherwise, Terminate it. Finally, if you have created too many images in ECR, consider deleting them, leaving only the latest image for future use. Delete old Task Definitions if not needed, and deregister the old Tasks. So, I have completed the resource cleanup. Thank you for reading. If you have any feedback, feel free to contact me via this Facebook link.\n"
+},
+{
+	"uri": "//localhost:1313/categories/",
+	"title": "Categories",
+	"tags": [],
+	"description": "",
+	"content": ""
+},
+{
+	"uri": "//localhost:1313/tags/",
+	"title": "Tags",
+	"tags": [],
+	"description": "",
+	"content": ""
+}]
